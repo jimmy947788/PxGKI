@@ -10,7 +10,7 @@
 >[!TIP]
 >If create a new fork, remember to change github username in the link below.
 ```
-git clone https://github.com/fixedcode/PxGKI.git
+git clone https://github.com/jimmy947788/PxGKI.git
 ```
 ```
 cd PxGKI
@@ -100,7 +100,21 @@ Also see [GKI release builds](https://source.android.com/docs/core/architecture/
 >fastboot --disable-verity --disable-verification flash vbmeta vbmeta.img
 >```
 
-**[fastboot]** — repack stock `boot.img` with the new kernel, so every other field stays untouched:
+**[Flashkernel.sh]** — the checked path. Verifies the image is a real Android boot image, that
+its header version and ramdisk layout match stock, prints the kernel release and whether KPM is
+embedded, checks the bootloader is unlocked, and only writes after you type `FLASH`. It touches the
+active slot only, so the other slot keeps its stock kernel.
+
+```
+chmod +x Flashkernel.sh
+./Flashkernel.sh                                  # newest image in Buildkernel/patched/
+./Flashkernel.sh Buildkernel/patched/boot_x.img   # or a specific one
+```
+
+Edit `Stock_Dir` at the top to point at your own firmware directory.
+
+**[fastboot]** — the same thing by hand; repack stock `boot.img` with the new kernel, so every other
+field stays untouched:
 
 ```
 python3 Buildkernel/tools/mkbootimg/unpack_bootimg.py --boot_img boot.img --out stock --format=mkbootimg
