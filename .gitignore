@@ -1,0 +1,17 @@
+# Local build tree created by Buildkernel.sh.
+# Holds the repo checkout (~6 GB) plus the bazel cache (~30 GB) — never commit this.
+/Buildkernel/
+
+# repo launcher, downloaded by the script before it is moved to /usr/local/bin
+/repo
+
+# Build outputs, in case they are ever produced outside Buildkernel/
+/dist*/
+/patched/
+*.img
+!/**/vbmeta.img
+
+# Editor / OS noise
+.DS_Store
+*.swp
+*~
