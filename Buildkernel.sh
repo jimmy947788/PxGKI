@@ -213,6 +213,11 @@ echo -e "\e[33m[Done]\e[0m" Add configuration to kernel
 if [ "$KERNEL_KPM" = "y" ]; then
   cd $Working_Dir/Buildkernel
   echo "CONFIG_KPM=y" >> common/arch/arm64/configs/gki_defconfig
+  # patch_linux prints "[?] can't find arm64 relocation table" on kernels built with
+  # CONFIG_RELR=y (the lld default): the relocations live in the compressed .relr.dyn
+  # section, so .rela.dyn is left nearly empty. It is a warning, not a failure - kpimg
+  # still takes over at runtime and loads .kpm modules (verified on 5.10.157 / raven).
+  # Do not "fix" it by turning RELR off.
   echo -e "\e[33m[Done]\e[0m" Add KPM configuration to kernel
   echo -e "\e[33m[Done]\e[0m" Enable KPM feature
 else

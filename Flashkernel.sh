@@ -118,9 +118,26 @@ fi
 
 # 6. Device
 green "Device"
+# "fastboot wait-for-device" does not exist -- wait-for-device is an adb subcommand.
+# fastboot blocks on any command until a device shows up, so poll "fastboot devices"
+# instead. That also lets us tell "not plugged in" apart from "enumerated but not
+# claimable", which a bare error code cannot.
 echo -n "  waiting for a device in fastboot mode (Ctrl+C to abort) ... "
-fastboot wait-for-device >/dev/null 2>&1 || die "fastboot wait-for-device failed"
+Wait_Secs="${Wait_Secs:-60}"
+for ((i = 0; i < Wait_Secs; i++)); do
+  serial=$(fastboot devices 2>/dev/null | awk 'NF {print $1; exit}')
+  [ -n "$serial" ] && break
+  sleep 1
+done
+if [ -z "${serial:-}" ]; then
+  echo
+  if lsusb -d 18d1: >/dev/null 2>&1; then
+    die "A Google device is on USB but fastboot cannot claim it - check udev (18d1 / plugdev) or unplug any USB hub in the path"
+  fi
+  die "No device in fastboot mode after ${Wait_Secs}s - check the cable, avoid USB hubs, and confirm the phone shows Fastboot Mode"
+fi
 echo "ok"
+echo "  serial           : $serial"
 
 product=$(fastboot getvar product 2>&1 | grep -m1 '^product:' | awk '{print $2}')
 unlocked=$(fastboot getvar unlocked 2>&1 | grep -m1 '^unlocked:' | awk '{print $2}')
