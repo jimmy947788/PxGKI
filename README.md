@@ -195,6 +195,62 @@ strings -n 6 dist/Image | grep -c KernelPatch      # 0 before, >0 after
 
 ---
 
+#### susfs: why the driver ref matters
+
+>[!IMPORTANT]
+>`CONFIG_KSU_SUSFS*` is defined by the **SukiSU driver's** `kernel/Kconfig`, not by the susfs
+>kernel patch. Kconfig drops symbols it does not know **without a warning**, and the build still
+>succeeds — so pointing `SukiSU_Src` at a ref with no susfs produces a kernel where root and KPM
+>work, the manager looks healthy, and susfs is simply not there. That is exactly what the susfs
+>module hitting a wall looks like: it reports `unsupport` and none of its rules apply.
+
+Only the **`builtin`** branch of SukiSU-Ultra carries kernel-side susfs. `main`, `susfs_new` and
+every `v3.x` / `v4.x` tag ship a driver with zero susfs code — the `susfs-main` / `susfs-test`
+branches the SukiSU docs still mention no longer exist.
+
+Two refs on that branch must be kept in step, both pinned at the top of `Buildkernel.sh`:
+
+| Setting | Value | Why |
+|---|---|---|
+| `SukiSU_Src` | `6c13a06` | `builtin`, 2026-05-30 — the last commit before `b8279c3` "implement uapi version (#3455)" |
+| `Susfs_Src` | `ee023e3` | susfs4ksu `gki-android13-5.10`, 2026-05-30, SUSFS **v2.1.0** — same generation as the driver |
+
+`b8279c3` and `adcea94` after it move the supercall ABI to a new generation: they add
+`KERNEL_SU_UAPI_VERSION = 2` and bump `KSU_APP_PROFILE_VER` from 3 to 4 (new `__u64 flags`).
+The v4.1.3 Manager APK speaks version 3, so anything at or after `b8279c3` gives "Failed to
+update App Profile" even though root works. `6c13a06` is the newest ref where susfs, KPM and the
+v4.1.3 manager all agree — **moving to `builtin` tip requires a post-uapi manager build**, and
+4.1.2 / 4.1.3 ship no APK asset at all.
+
+The script now fails loudly rather than shipping a susfs-less kernel:
+
+- after `setup.sh`, `HEAD` is compared against the pinned ref (`setup.sh` swallows a failed
+  `git checkout` and silently leaves you on `main`)
+- `config KSU_SUSFS` must exist in `KernelSU/kernel/Kconfig`
+- every `CONFIG_KSU_SUSFS*` line is checked against that Kconfig *before* it is appended
+- after the build, the generated `.config` must contain `CONFIG_KSU_SUSFS=y` and `dist/Image`
+  must contain susfs strings
+
+Only the ten options this driver actually defines are enabled. The older
+`AUTO_ADD_SUS_KSU_DEFAULT_MOUNT`, `AUTO_ADD_SUS_BIND_MOUNT`, `TRY_UMOUNT` and
+`AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT` symbols do not exist on this generation (SukiSU does its own
+umount handling) and were four more silently-dropped lines.
+
+>[!WARNING]
+>The module and the kernel are one matched set. Install the `ksu_module_susfs` built from the
+>**same** susfs4ksu commit — `Buildkernel/patched/ksu_module_susfs_v2.1.0.zip`, or rebuild it with
+>`cd Buildkernel/susfs4ksu && ./build_ksu_module.sh`. A module carrying a different `ksu_susfs`
+>binary talks a different supercall dialect.
+
+Check it on the device after flashing:
+
+```
+adb shell su -c 'ksu_susfs show version'          # -> v2.1.0, not "unsupport"
+adb shell su -c 'ksu_susfs show enabled_features'
+```
+
+---
+
 #### Build fixes carried by this script
 
 These are worked around automatically; listed so the behaviour is not surprising.
@@ -204,6 +260,7 @@ These are worked around automatically; listed so the behaviour is not surprising
 | `fatal: couldn't find remote ref refs/heads/android<N>-<ver>-<patch>` | Google moves retired patch levels to `deprecated/` on `kernel/common`, but the manifest still pins the old name | probes both names, writes `.repo/local_manifests/` override only when needed |
 | `Kernel_Suffix` silently ignored | the suffix logic was gated on `6.1`/`6.6` only, and its `stamp.bzl` sed matched a line that does not contain `-maybe-dirty` | applies to every version, matches the `export LOCALVERSION=` assignment directly |
 | `undefined symbol: __isoc23_strtoul` linking `resolve_btfids` | host glibc >= 2.38 redirects `strtol*`; `resolve_btfids/Makefile` forwards `EXTRA_CFLAGS` to libbpf but not to libsubcmd, so libsubcmd misses `--sysroot` | passes `HOSTCFLAGS` to the libsubcmd sub-make (not `CFLAGS`, which would drag in `-std=gnu89` and break libsubcmd's `-std=gnu99`) |
+| susfs module reports `unsupport`, no rules apply, root/KPM fine | `CONFIG_KSU_SUSFS*` is defined by the SukiSU driver's `kernel/Kconfig`; on a ref without susfs Kconfig drops every one of those lines silently | pins `SukiSU_Src` to the `builtin` branch and hard-fails if the symbols or the built `.config` are missing |
 | `implicit declaration of function 'VMA_PAD_START'` | susfs4ksu tracks the newest release of its kernel line, which has Android's `pgsize_migration`; older snapshots do not | rewrites it to `vma->vm_end` only when `include/linux/pgsize_migration.h` is absent |
 
 >[!TIP]

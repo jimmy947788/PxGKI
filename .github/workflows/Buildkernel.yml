@@ -91,13 +91,31 @@ jobs:
 
       - name: Set up SukiSU-Ultra
         run: |
+         set -euo pipefail
          cd Buildkernel
-         curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s builtin
+         # `builtin` is the only SukiSU branch carrying kernel-side susfs; 6c13a06 is its
+         # last commit before the uapi-version bump (KSU_APP_PROFILE_VER 3 -> 4), so the
+         # v4.1.3 Manager APK still speaks this ABI. Keep in sync with Buildkernel.sh.
+         SUKISU_SRC="6c13a06"
+         SUKISU_VER="v4.1.3"
+         curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s "$SUKISU_SRC"
+         git -C KernelSU fetch -q --tags --unshallow origin 2>/dev/null || git -C KernelSU fetch -q --tags origin 2>/dev/null || true
+         # setup.sh swallows a failed checkout, so verify HEAD instead of trusting it
+         test "$(git -C KernelSU rev-parse HEAD)" = "$(git -C KernelSU rev-parse "$SUKISU_SRC^{commit}")"
+         # without this symbol every CONFIG_KSU_SUSFS* below is silently dropped by Kconfig
+         grep -qE '^config[[:space:]]+KSU_SUSFS[[:space:]]*$' KernelSU/kernel/Kconfig
+         for f in KernelSU/kernel/Kbuild KernelSU/kernel/Makefile; do
+           if [ -f "$f" ] && grep -q '^REPO_BRANCH[[:space:]]*:=' "$f"; then
+             sed -i "s|^REPO_BRANCH[[:space:]]*:=.*|REPO_BRANCH := $SUKISU_VER|" "$f"; break
+           fi
+         done
         
       - name: Set up susfs
         run: |
          cd Buildkernel
          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android${{ github.event.inputs.Android_Release }}-${{ github.event.inputs.Kernel_Version }}
+         # pinned to the SUSFS generation that matches the SukiSU ref above (v2.1.0)
+         git -C susfs4ksu checkout -q --detach ee023e3
          cp susfs4ksu/kernel_patches/50_add_susfs_in_gki-android${{ github.event.inputs.Android_Release }}-${{ github.event.inputs.Kernel_Version }}.patch ./common/
          cp susfs4ksu/kernel_patches/fs/* ./common/fs/
          cp susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
@@ -113,11 +131,7 @@ jobs:
          echo "CONFIG_KSU_SUSFS_SUS_MAP=y" >> ./common/arch/arm64/configs/gki_defconfig
          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> ./common/arch/arm64/configs/gki_defconfig
          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
-         echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
-         echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
          echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> ./common/arch/arm64/configs/gki_defconfig
-         echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
-         echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
          echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> ./common/arch/arm64/configs/gki_defconfig
          echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> ./common/arch/arm64/configs/gki_defconfig
          echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> ./common/arch/arm64/configs/gki_defconfig
@@ -127,6 +141,11 @@ jobs:
          echo "CONFIG_TMPFS_XATTR=y" >> ./common/arch/arm64/configs/gki_defconfig
          echo "CONFIG_TMPFS_POSIX_ACL=y" >> ./common/arch/arm64/configs/gki_defconfig
          sed -i 's/check_defconfig//' ./common/build.config.gki
+         # fail loudly if any susfs symbol was silently dropped by Kconfig
+         for c in $(grep -o '^CONFIG_KSU_SUSFS[A-Z_]*' ./common/arch/arm64/configs/gki_defconfig); do
+           grep -qE "^config[[:space:]]+${c#CONFIG_}[[:space:]]*$" ./KernelSU/kernel/Kconfig \
+             || { echo "::error::$c is not defined by this SukiSU driver"; exit 1; }
+         done
          echo -e "\e[33m[Done]\e[0m" Add configuration to kernel
       
       - name: Add KPM configuration to kernel
