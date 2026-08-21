@@ -16,19 +16,20 @@ export User_Name="jimmy9478"
 export User_Email="jimmy@daedalus.cc"
 export Working_Dir="$HOME/Projects/PxGKI"
 
-# SukiSU-Ultra driver: SOURCE ref and VERSION-count ref are DECOUPLED on purpose.
-#
-# SukiSU_Src  = which driver source tree to compile. MUST stay on a ref that carries the
-#               built-in susfs glue (main / susfs_new). The v4.1.3 TAG source does NOT --
-#               its driver has no susfs support, so building from the tag yields a kernel
-#               with 0 susfs symbols (verified: main->180 susfs strings, v4.1.3->0).
-# SukiSU_Ver  = which ref's commit count drives KSU_VERSION. Pin to the SAME tag as the
-#               Manager APK you flash so the reported version matches and the manager's
-#               version gate opens (fixes banner + "Failed to update App Profile").
-#                 v4.1.3 -> KSU_VERSION 40796  (40000 base + 3611 tag commits - 2815 offset)
-# main source already ran on this device (susfs works), so its supercall ABI is proven;
-# only the reported number needs to read 40796.
-export SukiSU_Src="main"
+# SukiSU-Ultra driver ref. Build from the v4.1.3 TAG so the driver is the exact pre-uapi
+# pair of the v4.1.3 Manager APK (the newest stable release). The manager and kernel share a
+# supercall ABI: SukiSU `main` carries commit bd4e4eda "implement uapi version (#3455)",
+# merged AFTER the v4.1.3 release, which moves that ABI to a new generation the v4.1.3
+# manager does NOT speak -> the manager reports "Failed to update App Profile" (and susfs
+# rules don't apply) even though root works, the signature matches and the version banner is
+# clear. Building the driver from the tag keeps driver and manager on the same generation.
+#   - susfs is NOT affected by this ref: it comes from the susfs4ksu patch on common/
+#     (common/fs/susfs.c); the SukiSU driver carries zero susfs code in either ref. (The old
+#     "main->180 / tag->0 susfs strings" claim was an artefact of HIDE_KSU_SUSFS_SYMBOLS.)
+#   - KPM is NOT affected: the v4.1.3 tag ships kernel/kpm/ + CONFIG_KPM, same as main.
+# SukiSU_Ver drives KSU_VERSION; with src == ver == v4.1.3 the reported 40796 is genuine
+# (40000 base + 3611 tag commits - 2815 offset) and matches the manager with no banner.
+export SukiSU_Src="v4.1.3"
 export SukiSU_Ver="v4.1.3"
 
 # KPM (KernelPatch) tool version. Pins patch_linux to a tagged SukiSU_KernelPatch_patch

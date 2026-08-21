@@ -45,7 +45,7 @@ green "Repacking boot image from: $Image"
 
 # Read metadata out of the Image itself
 Release=$(strings "$Image" | grep -m1 -oE 'Linux version [0-9][^ ]*' | cut -d' ' -f3)
-KsuVer=$(strings -n 6 "$Image" | grep -m1 -aoE 'v[0-9]+\.[0-9]+\.[0-9]+-[0-9a-f]+@[a-z]+')
+KsuVer=$(strings -n 6 "$Image" | grep -m1 -aoE 'v[0-9]+\.[0-9]+\.[0-9]+-[0-9a-f]+@[A-Za-z]+')
 Kpm=$(strings -n 6 "$Image" | grep -c KernelPatch)
 [ -n "$Release" ] || die "could not read the kernel release string from $Image"
 echo "  kernel release : $Release"
