@@ -16,6 +16,26 @@ export User_Name="jimmy9478"
 export User_Email="jimmy@daedalus.cc"
 export Working_Dir="$HOME/Projects/PxGKI"
 
+# SukiSU-Ultra driver: SOURCE ref and VERSION-count ref are DECOUPLED on purpose.
+#
+# SukiSU_Src  = which driver source tree to compile. MUST stay on a ref that carries the
+#               built-in susfs glue (main / susfs_new). The v4.1.3 TAG source does NOT --
+#               its driver has no susfs support, so building from the tag yields a kernel
+#               with 0 susfs symbols (verified: main->180 susfs strings, v4.1.3->0).
+# SukiSU_Ver  = which ref's commit count drives KSU_VERSION. Pin to the SAME tag as the
+#               Manager APK you flash so the reported version matches and the manager's
+#               version gate opens (fixes banner + "Failed to update App Profile").
+#                 v4.1.3 -> KSU_VERSION 40796  (40000 base + 3611 tag commits - 2815 offset)
+# main source already ran on this device (susfs works), so its supercall ABI is proven;
+# only the reported number needs to read 40796.
+export SukiSU_Src="main"
+export SukiSU_Ver="v4.1.3"
+
+# KPM (KernelPatch) tool version. Pins patch_linux to a tagged SukiSU_KernelPatch_patch
+# release (which carries a matching kpimg) instead of tracking a moving branch tip, so the
+# injected KPM runtime is a known-good build. Only used when KERNEL_KPM=y.
+export KPM_Patch_Ver="0.13.0"
+
 # Kernel Suffix
 # Set (Kernel_Suffix="") meaning delete dirty suffix
 # or using custom suffix to replace it
@@ -157,7 +177,28 @@ fi
 # Set up SukiSU-Ultra
 echo -e "\e[32mSet up SukiSU-Ultra\e[0m"
 cd $Working_Dir/Buildkernel
-curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s builtin
+# setup.sh treats its argument as a git ref (tag/branch/commit) to check out, NOT an
+# install "mode": the old "builtin" arg was not a real ref, so it silently fell through
+# to main tip. Check out the SOURCE ref explicitly (main -> carries the susfs glue).
+curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s "$SukiSU_Src"
+# Guarantee the version-count ref is resolvable locally (tag + full history) so the
+# Kbuild rev-list fallback can tally it even if the GitHub-API path is rate-limited.
+if [ -d KernelSU/.git ]; then
+  git -C KernelSU fetch -q --tags --unshallow origin 2>/dev/null \
+    || git -C KernelSU fetch -q --tags origin 2>/dev/null || true
+fi
+
+# SukiSU's Kbuild derives KSU_VERSION from the commit count of REPO_BRANCH, which is
+# hardcoded to "main" - so even a checked-out tag still gets numbered off main's tip
+# (-> 40879). Repoint REPO_BRANCH at the pinned ref so both the GitHub-API and the local
+# rev-list count paths tally the tag's 3611 commits -> 40000+3611-2815 = 40796.
+if [ -f KernelSU/kernel/Kbuild ]; then
+  sed -i "s/^REPO_BRANCH :=.*/REPO_BRANCH := $SukiSU_Ver/" KernelSU/kernel/Kbuild
+  echo -e "\e[33m[Done]\e[0m" "Pinned SukiSU REPO_BRANCH -> $SukiSU_Ver (KSU_VERSION will match the manager)"
+else
+  echo -e "\e[31m[Error]\e[0m" "KernelSU/kernel/Kbuild not found - setup.sh did not clone the driver"
+  exit 1
+fi
 
 # Set up susfs
 echo -e "\e[32mSet up susfs\e[0m"
@@ -286,8 +327,17 @@ fi
 if [ "$KERNEL_KPM" = "y" ]; then
   echo -e "\e[32mKPM patch\e[0m"
   cd dist
-  [ -f ../patch_linux ] && cp ../patch_linux . \
-    || curl -LO "https://raw.githubusercontent.com/ShirkNeko/SukiSU_patch/refs/heads/main/kpm/patch_linux"
+  # Pin patch_linux to the tagged KernelPatch release. Cache it per-version so a re-run
+  # cannot silently reuse a different build's patch_linux (the old unversioned
+  # ../patch_linux cache did exactly that -> mismatched kpimg).
+  Patch_Cache="$Working_Dir/Buildkernel/patch_linux-$KPM_Patch_Ver"
+  if [ ! -f "$Patch_Cache" ]; then
+    echo -e "\e[32mDownloading patch_linux $KPM_Patch_Ver\e[0m"
+    curl -LSs -o "$Patch_Cache" \
+      "https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch/releases/download/$KPM_Patch_Ver/patch_linux" \
+      || { echo -e "\e[31m[Error]\e[0m failed to download patch_linux $KPM_Patch_Ver"; rm -f "$Patch_Cache"; exit 1; }
+  fi
+  cp "$Patch_Cache" ./patch_linux
   chmod 755 patch_linux
   ./patch_linux
   mv Image Image.orig

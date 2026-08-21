@@ -131,6 +131,19 @@ fastboot flash boot boot_new.img
 >`vendor_boot`, so stock `boot.img` legitimately reports `ramdisk size: 0`; other devices keep the
 >ramdisk in `boot` and would lose it.
 
+**[Repackboot.sh]** — the manual repack above, packaged. `Buildkernel.sh` only emits `dist/Image`
+and an AnyKernel3 zip, not a `fastboot`-flashable boot image; this script builds one. It reads the
+release / KSU version / KPM state straight out of the Image, lz4-compresses it (legacy frame, the
+format the raven bootloader decompresses), and packs a header-v4, ramdisk-less image with the stock
+layout, into `Buildkernel/patched/` where `Flashkernel.sh` finds it:
+
+```
+./Repackboot.sh                 # repack Buildkernel/dist/Image
+./Repackboot.sh path/to/Image   # or a specific Image
+# -> Buildkernel/patched/boot_sukisu_<release>_<ksu-tag>[_kpm].img, then:
+./Flashkernel.sh
+```
+
 Recovery, if it bootloops:
 
 ```
@@ -146,10 +159,15 @@ it will not refuse a wrong device.
 
 #### KPM
 
-KPM needs **two** steps, and the script does both:
+KPM needs **two** steps, and the script does both when `KERNEL_KPM=y`:
 
 1. `CONFIG_KPM=y` compiled into the kernel
-2. `patch_linux` applied to `dist/Image` afterwards (embeds KernelPatch, ~180 KB larger)
+2. `patch_linux` applied to `dist/Image` afterwards (embeds KernelPatch / kpimg, ~180 KB larger)
+
+`patch_linux` is pinned to a tagged [SukiSU_KernelPatch_patch](https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch)
+release via `KPM_Patch_Ver` (default `0.13.0`) instead of a moving branch tip, so the injected kpimg
+is a known-good build. It is cached as `Buildkernel/patch_linux-<ver>` and re-downloaded only if
+missing — a version bump is just editing `KPM_Patch_Ver`.
 
 Step 2 is offline post-processing on the raw `Image` and is kernel-version agnostic, so it can be
 applied to an already-built kernel without recompiling. Verify it landed:
@@ -159,9 +177,21 @@ strings -n 6 dist/Image | grep -c KernelPatch      # 0 before, >0 after
 ```
 
 >[!WARNING]
->The bundled `patch_linux` hardcodes the KernelPatch **superkey to `123`** and ignores every
->command-line flag (`-s`, `-p`, `-o`, ...) despite advertising them in its usage text. Setting a
->custom superkey requires upstream KernelPatch `kptools` + `kpimg` instead.
+>The `0.13.0` `patch_linux` embeds kpimg with its default KernelPatch **superkey `123`** (confirmed
+>in its output: `superkey: 123`). A custom superkey requires driving upstream KernelPatch
+>`kptools` + `kpimg` yourself instead of this one-shot `patch_linux`.
+
+>[!CAUTION]
+>**Do not edit `Buildkernel.sh` while a build is running.** `bash` reads the script from disk
+>line-by-line as it executes; saving the file mid-run shifts byte offsets and the parser desyncs,
+>which shows up as a bogus `syntax error near ... then`. If a run dies that way *after* the dist
+>step but *before* the KPM patch, don't recompile — finish by hand and repackage:
+>```
+>cd Buildkernel/dist
+>cp ../patch_linux-0.13.0 patch_linux && chmod 755 patch_linux && ./patch_linux
+>mv Image Image.orig && mv oImage Image && cp Image kernel
+>cd ../.. && ./Repackboot.sh          # -> patched/boot_sukisu_*_kpm.img
+>```
 
 ---
 
